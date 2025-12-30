@@ -336,15 +336,15 @@
             const firstSheetName = workbook.SheetNames[0];
             const worksheet = workbook.Sheets[firstSheetName];
 
-            // Convert to JSON to process
+            // Convert to JSON to process - keep ALL rows including blanks
             const jsonData = XLSX.utils.sheet_to_json(worksheet, {
                 header: 1,
-                defval: '',
-                blankrows: false
+                defval: null,
+                blankrows: true
             });
 
-            // Clean the data
-            cleanedData = cleanExcelData(jsonData, worksheet);
+            // Clean the data using the stocktake-specific algorithm
+            cleanedData = cleanStocktakeData(jsonData);
 
             // Display
             displayPreview(cleanedData, filename);
@@ -352,66 +352,89 @@
             showPreview();
         }
 
-        function cleanExcelData(data, worksheet) {
-            // Handle merged cells by filling them with the merged value
-            const merges = worksheet['!merges'] || [];
-            const filledData = JSON.parse(JSON.stringify(data)); // Deep copy
+        function isNumeric(value) {
+            if (value === null || value === undefined || value === '') return false;
+            return !isNaN(parseFloat(value)) && isFinite(value);
+        }
 
-            merges.forEach(merge => {
-                const startRow = merge.s.r;
-                const startCol = merge.s.c;
-                const endRow = merge.e.r;
-                const endCol = merge.e.c;
+        function cleanStocktakeData(data) {
+            // Define output headers
+            const headers = [
+                'Stock Group',
+                'InvCode',
+                'Stock Description',
+                'Unit (Inners)',
+                'Average Unit Cost',
+                'Quantity Entered',
+                'Quantity at Stocktake',
+                'Quantity Difference',
+                '$ Value of Difference',
+                'Value on hand at Stocktake'
+            ];
 
-                // Get the value from the first cell of the merge
-                const mergedValue = filledData[startRow] ? filledData[startRow][startCol] : '';
+            // Initialize output with headers
+            const output = [headers];
 
-                // Fill all cells in the merged range
-                for (let r = startRow; r <= endRow; r++) {
-                    if (!filledData[r]) filledData[r] = [];
-                    for (let c = startCol; c <= endCol; c++) {
-                        filledData[r][c] = mergedValue;
-                    }
+            let currentStockGroup = null;
+            let groupCount = 0;
+            let dataRowCount = 0;
+
+            // Process each row
+            for (let i = 0; i < data.length; i++) {
+                const row = data[i];
+
+                // Skip if row is completely empty
+                if (!row || row.length === 0) continue;
+
+                const firstCell = row[0];
+
+                // Check if this is a stock group header
+                if (typeof firstCell === 'string' && firstCell.startsWith('Stock Group No:')) {
+                    currentStockGroup = firstCell.replace('Stock Group No:', '').trim();
+                    groupCount++;
+                    continue;
                 }
-            });
 
-            // Remove completely empty rows
-            const nonEmptyRows = filledData.filter(row => {
-                return row && row.some(cell => cell !== '' && cell !== null && cell !== undefined);
-            });
+                // Check if this is a data row (numeric InvCode in column 0)
+                if (isNumeric(firstCell) && currentStockGroup !== null) {
+                    // Extract data from sparse columns
+                    const invCode = firstCell;
+                    const stockDesc = row[2] || '';
+                    const unit = row[3] || '';
+                    const avgUnitCost = row[4] || 0;
+                    const qtyEntered = row[5] || 0;
+                    const qtyStocktake = row[6] || 0;
+                    const qtyDifference = row[9] || 0;
+                    const valueDifference = row[11] || 0;
+                    const valueOnHand = row[12] || 0;
 
-            if (nonEmptyRows.length === 0) return [[]];
+                    // Create output row
+                    const outputRow = [
+                        currentStockGroup,
+                        invCode,
+                        stockDesc,
+                        unit,
+                        avgUnitCost,
+                        qtyEntered,
+                        qtyStocktake,
+                        qtyDifference,
+                        valueDifference,
+                        valueOnHand
+                    ];
 
-            // Find max columns
-            const maxCols = Math.max(...nonEmptyRows.map(row => row.length));
-
-            // Normalize row lengths
-            const normalizedRows = nonEmptyRows.map(row => {
-                const newRow = [...row];
-                while (newRow.length < maxCols) {
-                    newRow.push('');
-                }
-                return newRow;
-            });
-
-            // Remove completely empty columns
-            const columnsToKeep = [];
-            for (let c = 0; c < maxCols; c++) {
-                const hasData = normalizedRows.some(row => {
-                    const cell = row[c];
-                    return cell !== '' && cell !== null && cell !== undefined;
-                });
-                if (hasData) {
-                    columnsToKeep.push(c);
+                    output.push(outputRow);
+                    dataRowCount++;
                 }
             }
 
-            // Filter columns
-            const cleanedData = normalizedRows.map(row => {
-                return columnsToKeep.map(c => row[c]);
-            });
+            // Store stats for display
+            output.stats = {
+                groupCount: groupCount,
+                dataRowCount: dataRowCount,
+                inputRows: data.length
+            };
 
-            return cleanedData;
+            return output;
         }
 
         function displayPreview(data, filename) {
@@ -434,22 +457,50 @@
             thead.appendChild(headerRow);
             table.appendChild(thead);
 
-            // Create body rows
+            // Create body rows - format numbers for display
             const tbody = document.createElement('tbody');
             for (let i = 1; i < data.length; i++) {
                 const tr = document.createElement('tr');
-                data[i].forEach(cell => {
+                data[i].forEach((cell, colIndex) => {
                     const td = document.createElement('td');
-                    td.textContent = cell;
+
+                    // Format numbers for display
+                    if (colIndex === 1) {
+                        // InvCode - integer
+                        td.textContent = cell;
+                    } else if (colIndex === 4) {
+                        // Average Unit Cost - currency
+                        td.textContent = typeof cell === 'number' ? `$${cell.toFixed(2)}` : cell;
+                    } else if (colIndex >= 5 && colIndex <= 7) {
+                        // Quantities - decimal
+                        td.textContent = typeof cell === 'number' ? cell.toFixed(2) : cell;
+                    } else if (colIndex === 8 || colIndex === 9) {
+                        // Values - currency
+                        td.textContent = typeof cell === 'number' ? `$${cell.toFixed(2)}` : cell;
+                    } else {
+                        td.textContent = cell;
+                    }
+
                     tr.appendChild(td);
                 });
                 tbody.appendChild(tr);
             }
             table.appendChild(tbody);
 
-            // Update info
+            // Update info with stats
+            const stats = data.stats || {};
             document.getElementById('fileInfo').textContent =
-                `${filename} • ${data.length} rows × ${data[0].length} columns`;
+                `${filename} • ${stats.dataRowCount || (data.length - 1)} data rows • ${stats.groupCount || 0} stock groups • ${data[0].length} columns`;
+
+            // Update transformations list
+            const transformsList = document.getElementById('transformationsList');
+            transformsList.innerHTML = `
+                <li>Extracted ${stats.groupCount || 0} stock groups from input file</li>
+                <li>Converted ${stats.inputRows || 0} input rows to ${stats.dataRowCount || (data.length - 1)} clean data rows</li>
+                <li>Mapped sparse columns to dense table format</li>
+                <li>Added Stock Group column for easy filtering</li>
+                <li>Removed all merged cells and blank rows</li>
+            `;
         }
 
         function downloadExcel() {
@@ -462,11 +513,73 @@
             const newWorkbook = XLSX.utils.book_new();
             const newWorksheet = XLSX.utils.aoa_to_sheet(cleanedData);
 
+            // Set column widths (in Excel character units)
+            const columnWidths = [
+                { wch: 25 },  // Stock Group
+                { wch: 10 },  // InvCode
+                { wch: 40 },  // Stock Description
+                { wch: 15 },  // Unit (Inners)
+                { wch: 18 },  // Average Unit Cost
+                { wch: 18 },  // Quantity Entered
+                { wch: 20 },  // Quantity at Stocktake
+                { wch: 18 },  // Quantity Difference
+                { wch: 20 },  // $ Value of Difference
+                { wch: 25 }   // Value on hand at Stocktake
+            ];
+            newWorksheet['!cols'] = columnWidths;
+
+            // Apply number formatting to cells
+            const range = XLSX.utils.decode_range(newWorksheet['!ref']);
+
+            for (let R = range.s.r + 1; R <= range.e.r; R++) {
+                // Column B (index 1): InvCode - integer format
+                const invCodeCell = XLSX.utils.encode_cell({ r: R, c: 1 });
+                if (newWorksheet[invCodeCell]) {
+                    newWorksheet[invCodeCell].z = '0';
+                }
+
+                // Column E (index 4): Average Unit Cost - currency
+                const avgCostCell = XLSX.utils.encode_cell({ r: R, c: 4 });
+                if (newWorksheet[avgCostCell]) {
+                    newWorksheet[avgCostCell].z = '$#,##0.00';
+                }
+
+                // Columns F, G, H (indices 5, 6, 7): Quantities - decimal
+                for (let c = 5; c <= 7; c++) {
+                    const qtyCell = XLSX.utils.encode_cell({ r: R, c: c });
+                    if (newWorksheet[qtyCell]) {
+                        newWorksheet[qtyCell].z = '#,##0.00';
+                    }
+                }
+
+                // Columns I, J (indices 8, 9): Values - currency
+                for (let c = 8; c <= 9; c++) {
+                    const valCell = XLSX.utils.encode_cell({ r: R, c: c });
+                    if (newWorksheet[valCell]) {
+                        newWorksheet[valCell].z = '$#,##0.00';
+                    }
+                }
+            }
+
+            // Style header row (row 0)
+            for (let C = range.s.c; C <= range.e.c; C++) {
+                const headerCell = XLSX.utils.encode_cell({ r: 0, c: C });
+                if (newWorksheet[headerCell]) {
+                    newWorksheet[headerCell].s = {
+                        font: { bold: true, sz: 11 },
+                        fill: { fgColor: { rgb: "D3D3D3" } },
+                        alignment: { horizontal: "center", vertical: "center" }
+                    };
+                }
+            }
+
             // Add the worksheet to the workbook
             XLSX.utils.book_append_sheet(newWorkbook, newWorksheet, 'Clean Data');
 
             // Generate and download
-            XLSX.writeFile(newWorkbook, 'stocktake_cleaned.xlsx');
+            XLSX.writeFile(newWorkbook, 'clean_stock_take_report.xlsx', {
+                cellStyles: true
+            });
         }
 
         function showLoading() {
