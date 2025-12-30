@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stocktake Report Converter</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+
+        .upload-section {
+            padding: 40px;
+            text-align: center;
+        }
+
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 8px;
+            padding: 60px 40px;
+            background: #f8f9ff;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .upload-area:hover {
+            background: #f0f2ff;
+            border-color: #764ba2;
+        }
+
+        .upload-area.dragover {
+            background: #e8ebff;
+            border-color: #764ba2;
+            transform: scale(1.02);
+        }
+
+        .upload-icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+        }
+
+        .upload-text {
+            font-size: 1.2em;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .upload-hint {
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        .button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            font-size: 1em;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            margin: 10px;
+            display: inline-block;
+        }
+
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .button:active {
+            transform: translateY(0);
+        }
+
+        .button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .preview-section {
+            padding: 40px;
+            display: none;
+        }
+
+        .preview-section.visible {
+            display: block;
+        }
+
+        .actions {
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .table-container {
+            overflow-x: auto;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border: 1px solid #e0e0e0;
+        }
+
+        th {
+            background: #667eea;
+            color: white;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        tr:nth-child(even) {
+            background: #f8f9ff;
+        }
+
+        tr:hover {
+            background: #f0f2ff;
+        }
+
+        .info {
+            background: #e8f4fd;
+            border-left: 4px solid #2196F3;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+
+        .info-title {
+            font-weight: 600;
+            color: #1976D2;
+            margin-bottom: 5px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            display: none;
+        }
+
+        .loading.visible {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        footer {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📊 Stocktake Report Converter</h1>
+            <p class="subtitle">Convert messy Excel reports into clean, simple tables</p>
+        </header>
+
+        <div class="upload-section" id="uploadSection">
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-icon">📁</div>
+                <div class="upload-text">Drop your Excel file here or click to browse</div>
+                <div class="upload-hint">Supports .xlsx and .xls files</div>
+            </div>
+            <input type="file" id="fileInput" accept=".xlsx,.xls">
+        </div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Processing your file...</p>
+        </div>
+
+        <div class="preview-section" id="previewSection">
+            <div class="actions">
+                <div>
+                    <h2>Preview</h2>
+                    <div class="info-title" id="fileInfo"></div>
+                </div>
+                <div>
+                    <button class="button" onclick="downloadExcel()">💾 Download Clean Excel</button>
+                    <button class="button" onclick="resetApp()">🔄 Upload New File</button>
+                </div>
+            </div>
+
+            <div class="info">
+                <div class="info-title">✨ Transformations Applied:</div>
+                <ul id="transformationsList" style="margin-top: 10px; margin-left: 20px;">
+                    <li>Unmerged all cells</li>
+                    <li>Removed empty rows and columns</li>
+                    <li>Standardized formatting</li>
+                </ul>
+            </div>
+
+            <div class="table-container">
+                <table id="previewTable"></table>
+            </div>
+        </div>
+
+        <footer>
+            <p>Built with SheetJS • No data is sent to any server • All processing happens in your browser</p>
+        </footer>
+    </div>
+
+    <script>
+        let workbook = null;
+        let cleanedData = null;
+
+        // Setup event listeners
+        document.getElementById('uploadArea').addEventListener('click', () => {
+            document.getElementById('fileInput').click();
+        });
+
+        document.getElementById('fileInput').addEventListener('change', handleFileSelect);
+
+        // Drag and drop
+        const uploadArea = document.getElementById('uploadArea');
+
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        });
+
+        function handleFileSelect(e) {
+            const file = e.target.files[0];
+            if (file) {
+                handleFile(file);
+            }
+        }
+
+        function handleFile(file) {
+            if (!file.name.match(/\.(xlsx|xls)$/i)) {
+                alert('Please upload a valid Excel file (.xlsx or .xls)');
+                return;
+            }
+
+            showLoading();
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    processExcel(e.target.result, file.name);
+                } catch (error) {
+                    alert('Error processing file: ' + error.message);
+                    hideLoading();
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function processExcel(data, filename) {
+            // Read the workbook
+            workbook = XLSX.read(data, { type: 'array', cellStyles: true });
+
+            // Get the first sheet
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+
+            // Convert to JSON to process
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, {
+                header: 1,
+                defval: '',
+                blankrows: false
+            });
+
+            // Clean the data
+            cleanedData = cleanExcelData(jsonData, worksheet);
+
+            // Display
+            displayPreview(cleanedData, filename);
+            hideLoading();
+            showPreview();
+        }
+
+        function cleanExcelData(data, worksheet) {
+            // Handle merged cells by filling them with the merged value
+            const merges = worksheet['!merges'] || [];
+            const filledData = JSON.parse(JSON.stringify(data)); // Deep copy
+
+            merges.forEach(merge => {
+                const startRow = merge.s.r;
+                const startCol = merge.s.c;
+                const endRow = merge.e.r;
+                const endCol = merge.e.c;
+
+                // Get the value from the first cell of the merge
+                const mergedValue = filledData[startRow] ? filledData[startRow][startCol] : '';
+
+                // Fill all cells in the merged range
+                for (let r = startRow; r <= endRow; r++) {
+                    if (!filledData[r]) filledData[r] = [];
+                    for (let c = startCol; c <= endCol; c++) {
+                        filledData[r][c] = mergedValue;
+                    }
+                }
+            });
+
+            // Remove completely empty rows
+            const nonEmptyRows = filledData.filter(row => {
+                return row && row.some(cell => cell !== '' && cell !== null && cell !== undefined);
+            });
+
+            if (nonEmptyRows.length === 0) return [[]];
+
+            // Find max columns
+            const maxCols = Math.max(...nonEmptyRows.map(row => row.length));
+
+            // Normalize row lengths
+            const normalizedRows = nonEmptyRows.map(row => {
+                const newRow = [...row];
+                while (newRow.length < maxCols) {
+                    newRow.push('');
+                }
+                return newRow;
+            });
+
+            // Remove completely empty columns
+            const columnsToKeep = [];
+            for (let c = 0; c < maxCols; c++) {
+                const hasData = normalizedRows.some(row => {
+                    const cell = row[c];
+                    return cell !== '' && cell !== null && cell !== undefined;
+                });
+                if (hasData) {
+                    columnsToKeep.push(c);
+                }
+            }
+
+            // Filter columns
+            const cleanedData = normalizedRows.map(row => {
+                return columnsToKeep.map(c => row[c]);
+            });
+
+            return cleanedData;
+        }
+
+        function displayPreview(data, filename) {
+            const table = document.getElementById('previewTable');
+            table.innerHTML = '';
+
+            if (data.length === 0) {
+                table.innerHTML = '<tr><td>No data found in file</td></tr>';
+                return;
+            }
+
+            // Create header row (first row of data)
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+            data[0].forEach((cell, index) => {
+                const th = document.createElement('th');
+                th.textContent = cell || `Column ${index + 1}`;
+                headerRow.appendChild(th);
+            });
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+
+            // Create body rows
+            const tbody = document.createElement('tbody');
+            for (let i = 1; i < data.length; i++) {
+                const tr = document.createElement('tr');
+                data[i].forEach(cell => {
+                    const td = document.createElement('td');
+                    td.textContent = cell;
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            }
+            table.appendChild(tbody);
+
+            // Update info
+            document.getElementById('fileInfo').textContent =
+                `${filename} • ${data.length} rows × ${data[0].length} columns`;
+        }
+
+        function downloadExcel() {
+            if (!cleanedData) {
+                alert('No data to download');
+                return;
+            }
+
+            // Create a new workbook
+            const newWorkbook = XLSX.utils.book_new();
+            const newWorksheet = XLSX.utils.aoa_to_sheet(cleanedData);
+
+            // Add the worksheet to the workbook
+            XLSX.utils.book_append_sheet(newWorkbook, newWorksheet, 'Clean Data');
+
+            // Generate and download
+            XLSX.writeFile(newWorkbook, 'stocktake_cleaned.xlsx');
+        }
+
+        function showLoading() {
+            document.getElementById('uploadSection').style.display = 'none';
+            document.getElementById('loading').classList.add('visible');
+            document.getElementById('previewSection').classList.remove('visible');
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').classList.remove('visible');
+        }
+
+        function showPreview() {
+            document.getElementById('previewSection').classList.add('visible');
+        }
+
+        function resetApp() {
+            document.getElementById('uploadSection').style.display = 'block';
+            document.getElementById('previewSection').classList.remove('visible');
+            document.getElementById('fileInput').value = '';
+            workbook = null;
+            cleanedData = null;
+        }
+    </script>
+</body>
+</html>
